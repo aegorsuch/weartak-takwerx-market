@@ -7,6 +7,11 @@ on:
         description: Immutable commit SHA to check out for publisher code.
         required: true
         type: string
+      catalog_target:
+        description: Isolated catalog target (wearos or tracker); caller must own that host repository.
+        required: false
+        default: wearos
+        type: string
       market_catalog_public_key:
         description: Existing Base64 Ed25519 X.509 public key.
         required: true
@@ -47,6 +52,20 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - name: Validate catalog deployment target
+        env:
+          CATALOG_TARGET: ${{ inputs.catalog_target }}
+          CALLER_REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          case "$CATALOG_TARGET:$CALLER_REPOSITORY" in
+            wearos:aegorsuch/weartak-wearos|tracker:aegorsuch/weartak-tracker) ;;
+            *)
+              echo "Catalog target does not match its approved deployment repository." >&2
+              exit 1
+              ;;
+          esac
+
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           repository: aegorsuch/weartak-takwerx-market
@@ -69,6 +88,7 @@ jobs:
 
       - name: Build signed catalog
         env:
+          MARKET_CATALOG_TARGET: ${{ inputs.catalog_target }}
           MARKET_CATALOG_SIGNING_KEY: ${{ secrets.catalog_signing_key }}
           MARKET_CATALOG_PUBLIC_KEY: ${{ inputs.market_catalog_public_key }}
           MARKET_OUTPUT_DIR: ${{ github.workspace }}/site

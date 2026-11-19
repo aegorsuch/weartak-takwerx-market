@@ -1,4 +1,5 @@
 /market-publisher/site/
+/market-publisher/tracker-site/
 /node_modules/
 *.pem
 *.key

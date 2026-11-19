@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { generateKeyPairSync, verify } from "node:crypto";
+import { access, mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import {
   fetchPreviousCatalog,
   buildCatalog,
@@ -8,6 +13,11 @@ import {
   parseSignerSha256,
   signCatalog,
 } from "../publish_catalog.mjs";
+
+const trackerConfig = JSON.parse(await readFile(
+  new URL("../approved-tracker-repositories.json", import.meta.url),
+  "utf8",
+));
 
 function source(overrides = {}) {
   return {
@@ -153,6 +163,271 @@ test("reuses unchanged approved release metadata without downloading APK again",
     },
   );
   assert.deepEqual(secondCatalog, firstCatalog);
+});
+
+test("refreshes the approved WearOS host display name without changing identity or attribution", async () => {
+  const config = JSON.parse(await readFile(
+    new URL("../approved-repositories.json", import.meta.url),
+    "utf8",
+  ));
+  const host = config.repositories.find((entry) => entry.id === "weartak");
+  assert.ok(host);
+  const asset = {
+    name: "WearTAK-5.8.4-p736.apk",
+    size: 3,
+    browser_download_url: "https://github.com/aegorsuch/weartak-wearos/releases/download/v1/WearTAK-5.8.4-p736.apk",
+  };
+  let inspections = 0;
+  const options = {
+    fetchImpl: fetchForRelease([asset], {
+      assetBytes: new Map([[asset.name, Buffer.from("apk")]]),
+    }),
+    inspect: async () => {
+      inspections += 1;
+      return {
+        packageName: "com.aitech.weartak_civ",
+        versionName: "5.8.4-p736",
+        versionCode: 5840736,
+        signerSha256: "a".repeat(64),
+      };
+    },
+  };
+  const previousCatalog = await buildCatalog(
+    { schemaVersion: 1, repositories: [{ ...host, name: "WearTAK" }] },
+    options,
+  );
+  const catalog = await buildCatalog(
+    { schemaVersion: 1, repositories: [host] },
+    { ...options, previousCatalog },
+  );
+
+  assert.equal(inspections, 2);
+  assert.deepEqual(catalog.plugins, [{
+    ...previousCatalog.plugins[0],
+    name: "WearTAK-WearOS",
+  }]);
+});
+
+test("builds the approved Tracker host only for its explicit isolated target", async () => {
+  const asset = {
+    name: "WearTAK-Tracker-5.8.4-p62.apk",
+    size: 3,
+    browser_download_url: "https://github.com/aegorsuch/weartak-tracker/releases/download/takgov-pipeline/WearTAK-Tracker-5.8.4-p62.apk",
+  };
+  const requests = [];
+  const fetchImpl = fetchForRelease([asset], {
+    assetBytes: new Map([[asset.name, Buffer.from("apk")]]),
+  });
+  const catalog = await buildCatalog(trackerConfig, {
+    target: "tracker",
+    fetchImpl: async (url) => {
+      requests.push(url.toString());
+      return fetchImpl(url);
+    },
+    inspect: async () => ({
+      packageName: "com.tak.weartak_tracker",
+      versionName: "5.8.4-p62",
+      versionCode: 5860062,
+      signerSha256: trackerConfig.repositories[0].expectedSignerSha256,
+    }),
+  });
+
+  assert.equal(catalog.plugins.length, 1);
+  assert.deepEqual({
+    id: catalog.plugins[0].id,
+    name: catalog.plugins[0].name,
+    publisher: catalog.plugins[0].publisher,
+    publisherType: catalog.plugins[0].publisherType,
+    packageName: catalog.plugins[0].packageName,
+    hostUpdate: catalog.plugins[0].hostUpdate,
+    signerSha256: catalog.plugins[0].signerSha256,
+  }, {
+    id: "weartak-tracker",
+    name: "WearTAK-Tracker",
+    publisher: "WearTAK",
+    publisherType: "official",
+    packageName: "com.tak.weartak_tracker",
+    hostUpdate: true,
+    signerSha256: "430f146736b3dafc44157ff0b62836d16202244da17209176cb335ef0e63f2ec",
+  });
+  assert.deepEqual(requests, [
+    "https://api.github.com/repos/aegorsuch/weartak-tracker/releases/latest",
+    asset.browser_download_url,
+  ]);
+});
+
+test("the full default WearOS catalog excludes Tracker and preserves approved plugin metadata", async () => {
+  const config = JSON.parse(await readFile(
+    new URL("../approved-repositories.json", import.meta.url),
+    "utf8",
+  ));
+  const catalog = await buildCatalog(config, {
+    fetchImpl: async (url) => {
+      const request = new URL(url);
+      const repository = request.pathname.split("/")[request.hostname === "api.github.com" ? 3 : 2];
+      assert.notEqual(repository, "weartak-tracker");
+      const approved = config.repositories.find((entry) => entry.repo === repository);
+      assert.ok(approved);
+      if (request.hostname === "api.github.com") {
+        const name = approved.hostUpdate ? "WearTAK-1.apk" : `WearTAK-Plugin-${approved.name}-1.apk`;
+        return new Response(JSON.stringify({
+          draft: false,
+          prerelease: false,
+          assets: [{
+            name,
+            size: 3,
+            browser_download_url: `https://github.com/${approved.owner}/${approved.repo}/releases/download/v1/${name}`,
+          }],
+        }));
+      }
+      return new Response(Buffer.from(repository));
+    },
+    inspect: async (bytes) => {
+      const approved = config.repositories.find((entry) => entry.repo === bytes.toString());
+      assert.ok(approved);
+      return {
+        packageName: approved.packageName,
+        versionName: "1.0",
+        versionCode: 1,
+        signerSha256: approved.expectedSignerSha256 || "a".repeat(64),
+      };
+    },
+  });
+  assert.equal(catalog.plugins.length, config.repositories.length);
+  assert.equal(catalog.plugins.some((entry) => entry.packageName === "com.tak.weartak_tracker"), false);
+  for (const entry of catalog.plugins) {
+    const approved = config.repositories.find((source) => source.id === entry.id);
+    assert.equal(entry.name, approved.name);
+    assert.equal(entry.publisher, approved.publisher);
+    assert.equal(entry.packageName, approved.packageName);
+  }
+});
+
+test("rejects cross-target approvals and host impersonation before making requests", async () => {
+  const wearosConfig = JSON.parse(await readFile(
+    new URL("../approved-repositories.json", import.meta.url),
+    "utf8",
+  ));
+  const fetchImpl = async () => assert.fail("Invalid host policy must fail before network access.");
+  await assert.rejects(buildCatalog(trackerConfig, { fetchImpl }), /does not match the catalog target/);
+  await assert.rejects(
+    buildCatalog(wearosConfig, { target: "tracker", fetchImpl }),
+    /does not match the catalog target/,
+  );
+  await assert.rejects(
+    buildCatalog(trackerConfig, { target: "unknown", fetchImpl }),
+    /Catalog target/,
+  );
+
+  for (const [target, config, foreignHost] of [
+    ["wearos", wearosConfig, trackerConfig.repositories[0]],
+    ["tracker", trackerConfig, wearosConfig.repositories[0]],
+  ]) {
+    await assert.rejects(buildCatalog({
+      ...config,
+      repositories: [...config.repositories, foreignHost],
+    }, { target, fetchImpl }), /Only the official/);
+  }
+
+  for (const overrides of [
+    { repo: "unapproved-tracker" },
+    { packageName: "org.example.other" },
+    { expectedSignerSha256: undefined },
+    { hostUpdate: false, publisherType: "community" },
+  ]) {
+    await assert.rejects(buildCatalog({
+      ...trackerConfig,
+      repositories: [{ ...trackerConfig.repositories[0], ...overrides }],
+    }, { target: "tracker", fetchImpl }), /official|approved signer|host package/);
+  }
+});
+
+test("Tracker verification rejects wrong APK packages and signers", async () => {
+  const asset = {
+    name: "WearTAK-Tracker-5.8.4-p62.apk",
+    size: 3,
+    browser_download_url: "https://github.com/aegorsuch/weartak-tracker/releases/download/takgov-pipeline/WearTAK-Tracker-5.8.4-p62.apk",
+  };
+  for (const overrides of [
+    { packageName: "com.aitech.weartak_civ" },
+    { signerSha256: "a".repeat(64) },
+  ]) {
+    await assert.rejects(buildCatalog(trackerConfig, {
+      target: "tracker",
+      fetchImpl: fetchForRelease([asset], {
+        assetBytes: new Map([[asset.name, Buffer.from("apk")]]),
+      }),
+      inspect: async () => ({
+        packageName: "com.tak.weartak_tracker",
+        versionName: "5.8.4-p62",
+        versionCode: 5860062,
+        signerSha256: trackerConfig.repositories[0].expectedSignerSha256,
+        ...overrides,
+      }),
+    }), /package mismatch|signer mismatch/);
+  }
+});
+
+test("Tracker catalog fails closed without an eligible host APK", async () => {
+  await assert.rejects(buildCatalog(trackerConfig, {
+    target: "tracker",
+    fetchImpl: fetchForRelease([{
+      name: "WearTAK-Tracker-5.8.4-p61.apk",
+      size: 282357132,
+      browser_download_url: "https://github.com/aegorsuch/weartak-tracker/releases/download/takgov-pipeline/WearTAK-Tracker-5.8.4-p61.apk",
+    }]),
+    inspect: async () => assert.fail("Oversized Tracker APK must not be downloaded."),
+  }), /Tracker host APK exceeds the 250 MiB/);
+
+  await assert.rejects(buildCatalog(trackerConfig, {
+    target: "tracker",
+    fetchImpl: fetchForRelease([], { releaseOverrides: { prerelease: true } }),
+  }), /requires an eligible verified host APK/);
+});
+
+test("Tracker CLI selects its separate approvals and does not write an oversized-host catalog", async (t) => {
+  const outputDir = await mkdtemp(path.join(tmpdir(), "weartak-tracker-catalog-test-"));
+  t.after(() => rm(outputDir, { recursive: true, force: true }));
+  const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+  const preload = `
+    globalThis.fetch = async (url) => {
+      if (url.toString() === "https://aegorsuch.github.io/weartak-tracker/catalog.json") {
+        return new Response(null, { status: 404 });
+      }
+      if (url.toString() === "https://api.github.com/repos/aegorsuch/weartak-tracker/releases/latest") {
+        return new Response(JSON.stringify({
+          draft: false,
+          prerelease: false,
+          assets: [{
+            name: "WearTAK-Tracker-5.8.4-p61.apk",
+            size: 282357132,
+            browser_download_url: "https://github.com/aegorsuch/weartak-tracker/releases/download/takgov-pipeline/WearTAK-Tracker-5.8.4-p61.apk"
+          }]
+        }));
+      }
+      throw new Error("Unexpected request: " + url);
+    };
+  `;
+  const result = spawnSync(process.execPath, [
+    "--import",
+    `data:text/javascript,${encodeURIComponent(preload)}`,
+    fileURLToPath(new URL("../publish_catalog.mjs", import.meta.url)),
+  ], {
+    env: {
+      ...process.env,
+      MARKET_CATALOG_TARGET: "tracker",
+      MARKET_APPROVED_REPOSITORIES: "",
+      MARKET_CATALOG_SIGNING_KEY: privateKey.export({ format: "pem", type: "pkcs8" }).toString(),
+      MARKET_CATALOG_PUBLIC_KEY: publicKey.export({ format: "der", type: "spki" }).toString("base64"),
+      MARKET_OUTPUT_DIR: outputDir,
+    },
+    encoding: "utf8",
+    timeout: 10000,
+  });
+  assert.ifError(result.error);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Tracker host APK exceeds the 250 MiB/);
+  await assert.rejects(access(path.join(outputDir, "catalog.json")), { code: "ENOENT" });
 });
 
 test("skips prereleases and fails when an approved repository has no stable release", async () => {
@@ -317,5 +592,29 @@ test("accepts only a valid previously signed catalog", async () => {
       publicKeyBase64,
     ),
     /signature is invalid|envelope is invalid/,
+  );
+});
+
+test("previous-catalog requests use isolated target URLs and still verify signatures", async () => {
+  const keys = generateKeyPairSync("ed25519");
+  const publicKeyBase64 = keys.publicKey.export({ format: "der", type: "spki" }).toString("base64");
+  const privateKeyPem = keys.privateKey.export({ format: "pem", type: "pkcs8" }).toString();
+  const envelope = signCatalog({ schemaVersion: 1, plugins: [] }, privateKeyPem, publicKeyBase64);
+  const requests = [];
+  const fetchImpl = async (url) => {
+    requests.push(url.toString());
+    return new Response(envelope);
+  };
+  await fetchPreviousCatalog(fetchImpl, publicKeyBase64);
+  await fetchPreviousCatalog(fetchImpl, publicKeyBase64, "tracker");
+  assert.deepEqual(requests, [
+    "https://aegorsuch.github.io/weartak-wearos/catalog.json",
+    "https://aegorsuch.github.io/weartak-tracker/catalog.json",
+  ]);
+  const foreignKeys = generateKeyPairSync("ed25519");
+  const foreignPublicKey = foreignKeys.publicKey.export({ format: "der", type: "spki" }).toString("base64");
+  await assert.rejects(
+    fetchPreviousCatalog(fetchImpl, foreignPublicKey, "tracker"),
+    /signature is invalid/,
   );
 });

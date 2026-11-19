@@ -16,9 +16,30 @@ const execFile = promisify(execFileCallback);
 export const MAX_APK_BYTES = 250 * 1024 * 1024;
 const MAX_CATALOG_BYTES = 512 * 1024;
 const MAX_PLUGINS = 200;
-const PUBLISHED_CATALOG_URL = "https://aegorsuch.github.io/weartak-wearos/catalog.json";
+const CATALOG_TARGETS = new Map([
+  ["wearos", {
+    repository: "aegorsuch/weartak-wearos",
+    packageName: "com.aitech.weartak_civ",
+    configFile: "approved-repositories.json",
+    catalogUrl: "https://aegorsuch.github.io/weartak-wearos/catalog.json",
+    outputDirectory: "site",
+  }],
+  ["tracker", {
+    repository: "aegorsuch/weartak-tracker",
+    packageName: "com.tak.weartak_tracker",
+    configFile: "approved-tracker-repositories.json",
+    catalogUrl: "https://aegorsuch.github.io/weartak-tracker/catalog.json",
+    outputDirectory: "tracker-site",
+  }],
+]);
 const PACKAGE_PATTERN = /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$/;
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+
+function catalogTarget(target) {
+  const profile = CATALOG_TARGETS.get(target);
+  if (!profile) throw new Error("Catalog target must be 'wearos' or 'tracker'.");
+  return profile;
+}
 
 function requireHttps(rawUrl, label) {
   let url;
@@ -68,8 +89,8 @@ async function getJson(fetchImpl, url) {
   return response.json();
 }
 
-export async function fetchPreviousCatalog(fetchImpl, publicKeyBase64) {
-  const response = await fetchHttps(fetchImpl, PUBLISHED_CATALOG_URL, "application/json");
+export async function fetchPreviousCatalog(fetchImpl, publicKeyBase64, target = "wearos") {
+  const response = await fetchHttps(fetchImpl, catalogTarget(target).catalogUrl, "application/json");
   if (response.status === 404) return null;
   if (!response.ok) {
     throw new Error(`Previously published catalog request failed (HTTP ${response.status}).`);
@@ -190,7 +211,8 @@ async function inspectApk(apkBytes) {
   }
 }
 
-function validateSource(source) {
+function validateSource(source, target) {
+  const profile = catalogTarget(target);
   const textLimits = {
     owner: 100,
     repo: 100,
@@ -223,15 +245,22 @@ function validateSource(source) {
   }
   if (source.hostUpdate) {
     if (source.publisherType !== "official" ||
-        source.packageName !== "com.aitech.weartak_civ" ||
-        `${source.owner.toLowerCase()}/${source.repo.toLowerCase()}` !== "aegorsuch/weartak-wearos") {
-      throw new Error("Only the official WearTAK repository may publish host updates.");
+        source.packageName !== profile.packageName ||
+        `${source.owner.toLowerCase()}/${source.repo.toLowerCase()}` !== profile.repository) {
+      throw new Error(`Only the official ${target} repository and package may publish host updates.`);
+    }
+    if (target === "tracker" && !/^[0-9a-f]{64}$/.test(source.expectedSignerSha256 || "")) {
+      throw new Error("Tracker host updates require an approved signer.");
     }
   } else if (source.publisherType !== "community" ||
       typeof source.packageName !== "string" ||
       !PACKAGE_PATTERN.test(source.packageName) ||
       !/^[0-9a-f]{64}$/.test(source.expectedSignerSha256 || "")) {
     throw new Error("Community entries require an approved package and signer.");
+  }
+  if (!source.hostUpdate &&
+      [...CATALOG_TARGETS.values()].some((host) => host.packageName === source.packageName)) {
+    throw new Error("Community repository cannot publish a WearTAK host package.");
   }
   if (typeof source.assetPattern !== "string" || source.assetPattern.length > 200) {
     throw new Error(`Approved repository '${source.repo}' has an invalid asset pattern.`);
@@ -326,12 +355,6 @@ async function inspectReleaseAssets(source, release, fetchImpl, inspect, previou
         metadata.signerSha256 !== source.expectedSignerSha256.toLowerCase()) {
       throw new Error(`APK signer mismatch in approved repository '${source.repo}'.`);
     }
-    if (source.hostUpdate && metadata.packageName !== "com.aitech.weartak_civ") {
-      throw new Error("WearTAK update APK does not have the WearTAK application ID.");
-    }
-    if (!source.hostUpdate && metadata.packageName === "com.aitech.weartak_civ") {
-      throw new Error("Community repository cannot publish the WearTAK host package.");
-    }
     candidates.push({
       asset,
       apkSha256: createHash("sha256").update(apkBytes).digest("hex"),
@@ -352,10 +375,15 @@ export async function buildCatalog(config, {
   fetchImpl = globalThis.fetch,
   inspect = inspectApk,
   previousCatalog = null,
+  target = "wearos",
 } = {}) {
+  catalogTarget(target);
   if (config?.schemaVersion !== 1 || !Array.isArray(config.repositories) ||
       !Array.isArray(config.pendingRepositories || [])) {
     throw new Error("Approved repository configuration schema is invalid.");
+  }
+  if ((config.catalogTarget ?? "wearos") !== target) {
+    throw new Error("Approved repository configuration does not match the catalog target.");
   }
   if (config.repositories.length > MAX_PLUGINS) {
     throw new Error("Approved repository count exceeds catalog limit.");
@@ -364,7 +392,7 @@ export async function buildCatalog(config, {
   const ids = new Set();
   const repos = new Set();
   for (const source of config.repositories) {
-    validateSource(source);
+    validateSource(source, target);
     const fullName = `${source.owner.toLowerCase()}/${source.repo.toLowerCase()}`;
     if (ids.has(source.id) || repos.has(fullName)) {
       throw new Error("Approved repository configuration contains duplicates.");
@@ -404,7 +432,12 @@ export async function buildCatalog(config, {
       inspect,
       previousEntries.get(source.id),
     );
-    if (selected === null) continue;
+    if (selected === null) {
+      if (target === "tracker" && source.hostUpdate) {
+        throw new Error("Tracker host APK exceeds the 250 MiB client limit; catalog was not built.");
+      }
+      continue;
+    }
     if (selected.reused) {
       plugins.push(selected.entry);
       continue;
@@ -433,6 +466,9 @@ export async function buildCatalog(config, {
   const packageNames = plugins.map((plugin) => plugin.packageName);
   if (new Set(packageNames).size !== packageNames.length) {
     throw new Error("Catalog sources contain duplicate APK package names.");
+  }
+  if (target === "tracker" && !plugins.some((plugin) => plugin.hostUpdate)) {
+    throw new Error("Tracker catalog requires an eligible verified host APK.");
   }
   plugins.sort((left, right) => left.id.localeCompare(right.id));
   return { schemaVersion: 1, plugins };
@@ -468,16 +504,18 @@ export function signCatalog(catalog, privateKeyPem, expectedPublicKeyBase64) {
 
 async function main() {
   const currentDir = path.dirname(fileURLToPath(import.meta.url));
+  const target = process.env.MARKET_CATALOG_TARGET || "wearos";
+  const profile = catalogTarget(target);
   const configPath = process.env.MARKET_APPROVED_REPOSITORIES ||
-    path.join(currentDir, "approved-repositories.json");
+    path.join(currentDir, profile.configFile);
   const config = JSON.parse(await readFile(configPath, "utf8"));
   const privateKey = process.env.MARKET_CATALOG_SIGNING_KEY || "";
   const publicKey = process.env.MARKET_CATALOG_PUBLIC_KEY || "";
   signCatalog({ schemaVersion: 1, plugins: [] }, privateKey, publicKey);
-  const previousCatalog = await fetchPreviousCatalog(globalThis.fetch, publicKey);
-  const catalog = await buildCatalog(config, { previousCatalog });
+  const previousCatalog = await fetchPreviousCatalog(globalThis.fetch, publicKey, target);
+  const catalog = await buildCatalog(config, { previousCatalog, target });
   const envelope = signCatalog(catalog, privateKey, publicKey);
-  const outputDir = process.env.MARKET_OUTPUT_DIR || path.join(currentDir, "site");
+  const outputDir = process.env.MARKET_OUTPUT_DIR || path.join(currentDir, profile.outputDirectory);
   await mkdir(outputDir, { recursive: true });
   await writeFile(path.join(outputDir, "catalog.json"), envelope, { mode: 0o644 });
   console.log(`Published catalog envelope with ${catalog.plugins.length} release(s).`);

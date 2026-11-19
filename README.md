@@ -9,9 +9,11 @@ metadata with Ed25519.
 
 ## Status
 
-Staged for later integration with the existing WearTAK mirror workflow. This
-repository does not currently deploy a catalog or change the catalog URL used
-by watches.
+WearOS is the default catalog target. Tracker support uses separate approvals
+and a separate caller-owned Pages site. Its canonical signed p65 APK is below
+the unchanged 250-MiB limit; deployment and client activation still require
+the isolated caller and signing identity described below. This repository
+does not deploy catalogs on its own or change URLs used by existing watches.
 
 ## Point of Contacts
 
@@ -46,6 +48,11 @@ workflow runs in its caller's repository context so GitHub Pages remains
 deployed by the existing mirror. The caller must pass the existing signing
 secret explicitly and provide this repository's immutable commit SHA both as
 the reusable workflow ref and `publisher_ref`.
+
+Tracker callers must select `catalog_target: tracker` and configure their own
+catalog URL/key. Tracker host records are rejected from the WearOS target.
+See the linked documentation for verified APK-size findings and activation
+requirements; no live catalog changes are included.
 
 Do not pass signing secrets from pull-request workflows. Pin the called
 workflow and publisher checkout to a reviewed commit SHA; changing that pin

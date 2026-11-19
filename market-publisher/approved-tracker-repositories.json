@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "catalogTarget": "tracker",
+  "repositories": [
+    {
+      "owner": "aegorsuch",
+      "repo": "weartak-tracker",
+      "id": "weartak-tracker",
+      "name": "WearTAK-Tracker",
+      "description": "WearTAK-Tracker application update.",
+      "publisher": "WearTAK",
+      "publisherType": "official",
+      "hostUpdate": true,
+      "packageName": "com.tak.weartak_tracker",
+      "expectedSignerSha256": "430f146736b3dafc44157ff0b62836d16202244da17209176cb335ef0e63f2ec",
+      "minHostVersionCode": 1,
+      "maxHostVersionCode": null,
+      "assetPattern": "^WearTAK-Tracker-[0-9][A-Za-z0-9._-]*-p[0-9]+\\.apk$"
+    }
+  ],
+  "pendingRepositories": []
+}
