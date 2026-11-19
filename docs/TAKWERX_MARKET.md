@@ -172,12 +172,17 @@ events:
 jobs:
   test-publisher:
     if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
     permissions:
       contents: read
-    uses: aegorsuch/weartak-takwerx-market/.github/workflows/publish-market-catalog.yml@SHA
-    with:
-      publisher_ref: SHA
-      market_catalog_public_key: ${{ vars.MARKET_CATALOG_PUBLIC_KEY }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: aegorsuch/weartak-takwerx-market
+          ref: SHA
+          path: publisher
+          persist-credentials: false
+      - run: node --test publisher/market-publisher/tests/publish_catalog.test.mjs
 
   publish:
     if: github.event_name != 'pull_request' && github.event_name != 'pull_request_target' && github.ref == 'refs/heads/main'
@@ -198,6 +203,11 @@ GitHub Pages configuration and `github-pages` environment. Do not pass the
 signing secret on pull-request runs. Pinning the workflow and checkout to the
 same reviewed SHA means later publisher changes cannot silently acquire the
 secret; every pin update should be reviewed as privileged code.
+
+Run pull-request tests directly from the pinned checkout rather than calling
+the publishing workflow with read-only permissions. GitHub validates nested
+job permissions even when the nested publishing job would be skipped; a
+test-only reusable call would therefore require unnecessary Pages/OIDC grants.
 
 ## Signed format and limits
 
