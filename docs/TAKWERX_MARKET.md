@@ -63,7 +63,39 @@ official repository and package. Known host packages cannot be submitted as
 community plugins. The publisher rejects foreign host approvals instead of
 relying on client-side filtering. Cache reuse fetches and signature-verifies
 only the selected target's previous catalog. Signed envelope and payload
-schema remain unchanged.
+schema remain unchanged for these v1 targets.
+
+## Shared schema v2 (local generation only)
+
+An explicit `MARKET_CATALOG_TARGET=shared` builds one v2 catalog from a
+reviewed configuration supplied in `MARKET_APPROVED_REPOSITORIES`. The file
+must declare `schemaVersion: 2` and `catalogTarget: shared`; no shared approval
+file or compatibility claims are supplied by default. Each reviewed entry
+retains the existing source, package, signer and release-asset policy fields,
+but replaces v1 host-version fields with `targets`. Each target has exactly
+`productId`, `editionIds`, `minHostVersionCode` and `maxHostVersionCode`.
+Products are `weartak-wearos` or `weartak-tracker`, with at most one target per
+product. Editions are nonempty, unique selections of `civ` and `mil`; bounds
+are positive safe integer minimums and either null or an integer maximum at
+least as large as the minimum. Record only reviewed compatibility; never infer
+it from the existing v1 approvals. Host updates must target only their own
+product and retain the existing host identity and signer rules.
+
+Use the existing signing key and matching public key through
+`MARKET_CATALOG_SIGNING_KEY` and `MARKET_CATALOG_PUBLIC_KEY`. Local output
+defaults to `market-publisher/shared-site/catalog.json` and may be overridden
+with `MARKET_OUTPUT_DIR`. Shared generation does not fetch or reuse a previous
+catalog because no shared endpoint has been authorized. Existing v1 targets,
+URLs, workflows, secrets and caller pins are unchanged.
+
+Before any shared deployment, review the shared approval list and each
+product/edition/version range, confirm all intended clients support v2 and
+trust the same existing catalog signing identity, and authorize an endpoint,
+hosting/caller permissions and deployment. Verify that endpoint and signature
+before switching clients. If existing client trust keys differ, resolve that
+separately without silently rotating keys. Until rollout is authorized, retain
+both existing v1 outputs; do not activate the reusable deployment workflow
+for shared output.
 
 ### Tracker activation (not performed)
 
@@ -212,7 +244,8 @@ test-only reusable call would therefore require unnecessary Pages/OIDC grants.
 ## Signed format and limits
 
 The output is the existing JSON envelope: Base64 payload and Base64 Ed25519
-signature. Payload schema stays version 1. HTTPS is required for catalog and
+signature. Existing targets emit schema 1; opt-in shared generation emits
+schema 2. HTTPS is required for catalog and
 APK URLs; redirects cannot downgrade to HTTP. APKs are capped at 250 MiB to
 match client limits. See the WearTAK market documentation in
 [`weartak-wearos`](https://github.com/aegorsuch/weartak-wearos) for client
