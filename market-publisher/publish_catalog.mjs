@@ -61,11 +61,16 @@ function requireHttps(rawUrl, label) {
 async function fetchHttps(fetchImpl, rawUrl, accept, { githubAssetRedirects = false } = {}) {
   let url = requireHttps(rawUrl, "Request URL");
   for (let redirectCount = 0; redirectCount <= 5; redirectCount += 1) {
+    const headers = {
+      Accept: accept,
+      "User-Agent": "WearTAK-Market-Catalog-Publisher",
+    };
+    if ((url.hostname === "api.github.com" || url.hostname === "github.com") &&
+        process.env.GITHUB_TOKEN) {
+      headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+    }
     const response = await fetchImpl(url, {
-      headers: {
-        Accept: accept,
-        "User-Agent": "WearTAK-Market-Catalog-Publisher",
-      },
+      headers,
       redirect: "manual",
     });
     if (!REDIRECT_STATUSES.has(response.status)) return response;
