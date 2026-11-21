@@ -449,6 +449,59 @@ test("skips prereleases and fails when an approved repository has no stable rele
   );
 });
 
+test("reports only safe release API diagnostics without retrying", async () => {
+  let requests = 0;
+  await assert.rejects(buildCatalog(
+    { schemaVersion: 1, repositories: [source()] },
+    {
+      fetchImpl: async () => {
+        requests += 1;
+        return new Response("private response body", {
+          status: 403,
+          headers: {
+            "x-ratelimit-remaining": "0",
+            "x-ratelimit-reset": "1795240000",
+            "retry-after": "60",
+            "x-github-request-id": "ABCD:1234:EF56:7890",
+            "authorization": "sensitive-header",
+          },
+        });
+      },
+    },
+  ), (error) => {
+    assert.equal(error.message, "GitHub release API request failed for 'aegorsuch/weartak-plugin-example' (HTTP 403; x-ratelimit-remaining=0; x-ratelimit-reset=1795240000; retry-after=60; x-github-request-id=ABCD:1234:EF56:7890).");
+    assert.doesNotMatch(error.message, /private response body|sensitive-header/);
+    return true;
+  });
+  assert.equal(requests, 1);
+});
+
+test("omits missing, malformed and out-of-range API diagnostic headers", async () => {
+  for (const headers of [
+    {},
+    {
+      "x-ratelimit-remaining": "secret-value",
+      "x-ratelimit-reset": "99999999999999999999",
+      "retry-after": "86401",
+      "x-github-request-id": "secret-value",
+    },
+    {
+      "x-ratelimit-remaining": "-1",
+      "x-ratelimit-reset": "1.5",
+      "retry-after": "Wed, 21 Oct 2015 07:28:00 GMT",
+      "x-github-request-id": "ABCD:1234:EF56:7890:secret",
+    },
+  ]) {
+    await assert.rejects(buildCatalog(
+      { schemaVersion: 1, repositories: [source()] },
+      { fetchImpl: async () => new Response("secret body", { status: 403, headers }) },
+    ), (error) => {
+      assert.equal(error.message, "GitHub release API request failed for 'aegorsuch/weartak-plugin-example' (HTTP 403).");
+      return true;
+    });
+  }
+});
+
 test("does not fetch repositories listed only as pending", async () => {
   const catalog = await buildCatalog({
     schemaVersion: 1,

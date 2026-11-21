@@ -13,6 +13,12 @@ checks HTTPS redirects and download limits, computes SHA-256 digests, and
 signs the catalog with Ed25519. It reuses unchanged entries only from the
 previous catalog after verifying that catalog's signature.
 
+For failed approved-release API requests, diagnostics identify the repository
+and HTTP status. Validated rate-limit numbers, numeric retry delay (at most
+one day), and GitHub request ID are included when available; response bodies
+and other headers are not logged. Missing or malformed values are omitted.
+Failures still stop publication without retries.
+
 ## Host display metadata
 
 The approved WearOS host entry uses display name `WearTAK-WearOS`. Its

@@ -123,7 +123,9 @@
   ],
   "pendingRepositories": [
     "aegorsuch/weartak-plugin-aster",
+    "aegorsuch/weartak-plugin-dart",
     "aegorsuch/weartak-plugin-ditto",
+    "aegorsuch/weartak-plugin-falcon",
     "aegorsuch/weartak-plugin-hail",
     "aegorsuch/weartak-plugin-somewear",
     "aegorsuch/weartak-plugin-lattice",

@@ -82,10 +82,28 @@ async function fetchHttps(fetchImpl, rawUrl, accept, { githubAssetRedirects = fa
   throw new Error("Release request exceeded redirect limit.");
 }
 
-async function getJson(fetchImpl, url) {
+async function getJson(fetchImpl, url, repository) {
   const response = await fetchHttps(fetchImpl, url, "application/vnd.github+json");
   if (response.status === 404) return null;
-  if (!response.ok) throw new Error(`GitHub API request failed (HTTP ${response.status}).`);
+  if (!response.ok) {
+    const details = [];
+    for (const [header, maximum] of [
+      ["x-ratelimit-remaining", 1000000000],
+      ["x-ratelimit-reset", 9999999999],
+      ["retry-after", 86400],
+    ]) {
+      const value = response.headers.get(header);
+      if (value !== null && /^[0-9]{1,10}$/.test(value) && Number(value) <= maximum) {
+        details.push(`${header}=${value}`);
+      }
+    }
+    const requestId = response.headers.get("x-github-request-id");
+    if (requestId && /^[a-f0-9]{1,16}(?::[a-f0-9]{1,16}){3,5}$/i.test(requestId)) {
+      details.push(`x-github-request-id=${requestId}`);
+    }
+    const suffix = details.length ? `; ${details.join("; ")}` : "";
+    throw new Error(`GitHub release API request failed for '${repository}' (HTTP ${response.status}${suffix}).`);
+  }
   return response.json();
 }
 
@@ -419,7 +437,7 @@ export async function buildCatalog(config, {
   );
   for (const source of config.repositories) {
     const apiUrl = `https://api.github.com/repos/${source.owner}/${source.repo}/releases/latest`;
-    const release = await getJson(fetchImpl, apiUrl);
+    const release = await getJson(fetchImpl, apiUrl, `${source.owner}/${source.repo}`);
     if (release === null) {
       throw new Error(`Approved repository '${source.repo}' has no stable release.`);
     }
