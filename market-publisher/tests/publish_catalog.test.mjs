@@ -475,6 +475,38 @@ test("the full default WearOS catalog excludes Tracker and preserves approved pl
   }
 });
 
+test("publishes the approved Ditto scaffold for WearOS", async () => {
+  const config = JSON.parse(await readFile(
+    new URL("../approved-repositories.json", import.meta.url),
+    "utf8",
+  ));
+  const ditto = config.repositories.find((entry) => entry.id === "ditto");
+  assert.ok(ditto);
+  assert.equal(config.pendingRepositories.includes("aegorsuch/weartak-plugin-ditto"), false);
+
+  const name = "WearTAK-Plugin-Ditto-5.8.4-p17.apk";
+  const asset = {
+    name,
+    size: 3,
+    browser_download_url: `https://github.com/aegorsuch/weartak-plugin-ditto/releases/download/v5.8.4-p17/${name}`,
+  };
+  const catalog = await buildCatalog({ schemaVersion: 1, repositories: [ditto] }, {
+    fetchImpl: fetchForRelease([asset], { assetBytes: new Map([[name, Buffer.from("apk")]]) }),
+    inspect: async () => ({
+      packageName: "com.weartak.plugin.ditto",
+      versionName: "5.8.4-p17+029ce5af",
+      versionCode: 5840017,
+      signerSha256: "1579b600cd84e619e76a91c2db6b031938c999bc2aad926b9a51ec2b166d348d",
+    }),
+  });
+  const [entry] = catalog.plugins;
+  assert.equal(entry.description, "Inactive development scaffold; Ditto mesh functionality is not implemented.");
+  assert.equal(entry.versionCode, 5840017);
+  assert.equal(entry.versionName, "5.8.4-p17+029ce5af");
+  assert.equal(entry.minHostVersionCode, 5840000);
+  assert.equal(entry.maxHostVersionCode, null);
+});
+
 test("rejects cross-target approvals and host impersonation before making requests", async () => {
   const wearosConfig = JSON.parse(await readFile(
     new URL("../approved-repositories.json", import.meta.url),
