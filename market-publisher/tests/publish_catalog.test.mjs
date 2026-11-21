@@ -356,50 +356,75 @@ test("refreshes the approved WearOS host display name without changing identity 
 });
 
 test("builds the approved Tracker host only for its explicit isolated target", async () => {
-  const asset = {
+  const hostAsset = {
     name: "WearTAK-Tracker-5.8.4-p62.apk",
     size: 3,
     browser_download_url: "https://github.com/aegorsuch/weartak-tracker/releases/download/takgov-pipeline/WearTAK-Tracker-5.8.4-p62.apk",
   };
+  const asterAsset = {
+    name: "WearTAK-Plugin-Aster-0.1.0-evaluation-p89.apk",
+    size: 3,
+    browser_download_url: "https://github.com/aegorsuch/weartak-plugin-aster/releases/download/evaluation/WearTAK-Plugin-Aster-0.1.0-evaluation-p89.apk",
+  };
   const requests = [];
-  const fetchImpl = fetchForRelease([asset], {
-    assetBytes: new Map([[asset.name, Buffer.from("apk")]]),
+  const fetchImpl = fetchForRelease([], {
+    assetBytes: new Map([
+      [hostAsset.name, Buffer.from("host-apk")],
+      [asterAsset.name, Buffer.from("aster-apk")],
+    ]),
   });
   const catalog = await buildCatalog(trackerConfig, {
     target: "tracker",
     fetchImpl: async (url) => {
       requests.push(url.toString());
+      if (url.toString().includes("/repos/aegorsuch/weartak-tracker/releases/latest")) {
+        return new Response(JSON.stringify({ draft: false, prerelease: false, assets: [hostAsset] }), { status: 200 });
+      }
+      if (url.toString().includes("/repos/aegorsuch/weartak-plugin-aster/releases/latest")) {
+        return new Response(JSON.stringify({ draft: false, prerelease: false, assets: [asterAsset] }), { status: 200 });
+      }
       return fetchImpl(url);
     },
-    inspect: async () => ({
-      packageName: "com.tak.weartak_tracker",
-      versionName: "5.8.4-p62",
-      versionCode: 5860062,
-      signerSha256: trackerConfig.repositories[0].expectedSignerSha256,
-    }),
+    inspect: async (_apkBytes, asset) => asset.name.includes("Aster")
+      ? {
+          packageName: "com.weartak.plugin.aster",
+          versionName: "0.1.0-evaluation",
+          versionCode: 89,
+          signerSha256: trackerConfig.repositories[1].expectedSignerSha256,
+        }
+      : {
+          packageName: "com.tak.weartak_tracker",
+          versionName: "5.8.4-p62",
+          versionCode: 5860062,
+          signerSha256: trackerConfig.repositories[0].expectedSignerSha256,
+        },
   });
 
-  assert.equal(catalog.plugins.length, 1);
+  assert.equal(catalog.plugins.length, 2);
+  const aster = catalog.plugins.find((plugin) => plugin.id === "aster");
+  assert.ok(aster);
   assert.deepEqual({
-    id: catalog.plugins[0].id,
-    name: catalog.plugins[0].name,
-    publisher: catalog.plugins[0].publisher,
-    publisherType: catalog.plugins[0].publisherType,
-    packageName: catalog.plugins[0].packageName,
-    hostUpdate: catalog.plugins[0].hostUpdate,
-    signerSha256: catalog.plugins[0].signerSha256,
+    id: aster.id,
+    name: aster.name,
+    publisher: aster.publisher,
+    publisherType: aster.publisherType,
+    packageName: aster.packageName,
+    hostUpdate: aster.hostUpdate,
+    signerSha256: aster.signerSha256,
   }, {
-    id: "weartak-tracker",
-    name: "WearTAK-Tracker",
-    publisher: "WearTAK",
-    publisherType: "official",
-    packageName: "com.tak.weartak_tracker",
-    hostUpdate: true,
-    signerSha256: "430f146736b3dafc44157ff0b62836d16202244da17209176cb335ef0e63f2ec",
+    id: "aster",
+    name: "Aster",
+    publisher: "aegorsuch",
+    publisherType: "community",
+    packageName: "com.weartak.plugin.aster",
+    hostUpdate: false,
+    signerSha256: "1579b600cd84e619e76a91c2db6b031938c999bc2aad926b9a51ec2b166d348d",
   });
   assert.deepEqual(requests, [
     "https://api.github.com/repos/aegorsuch/weartak-tracker/releases/latest",
-    asset.browser_download_url,
+    hostAsset.browser_download_url,
+    "https://api.github.com/repos/aegorsuch/weartak-plugin-aster/releases/latest",
+    asterAsset.browser_download_url,
   ]);
 });
 

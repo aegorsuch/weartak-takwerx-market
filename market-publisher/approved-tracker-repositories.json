@@ -16,6 +16,21 @@
       "minHostVersionCode": 1,
       "maxHostVersionCode": null,
       "assetPattern": "^WearTAK-Tracker-[0-9][A-Za-z0-9._-]*-p[0-9]+\\.apk$"
+    },
+    {
+      "owner": "aegorsuch",
+      "repo": "weartak-plugin-aster",
+      "id": "aster",
+      "name": "Aster",
+      "description": "WearTAK Aster evaluation plugin.",
+      "publisher": "aegorsuch",
+      "publisherType": "community",
+      "hostUpdate": false,
+      "packageName": "com.weartak.plugin.aster",
+      "expectedSignerSha256": "1579b600cd84e619e76a91c2db6b031938c999bc2aad926b9a51ec2b166d348d",
+      "minHostVersionCode": 1,
+      "maxHostVersionCode": null,
+      "assetPattern": "^WearTAK-Plugin-Aster-.*\\.apk$"
     }
   ],
   "pendingRepositories": []

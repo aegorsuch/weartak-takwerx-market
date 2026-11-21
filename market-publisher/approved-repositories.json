@@ -119,16 +119,72 @@
       "minHostVersionCode": 5840000,
       "maxHostVersionCode": null,
       "assetPattern": "^WearTAK-Plugin-LACE-.*\\.apk$"
+    },
+    {
+      "owner": "aegorsuch",
+      "repo": "weartak-plugin-aster",
+      "id": "aster",
+      "name": "Aster",
+      "description": "WearTAK Aster evaluation plugin.",
+      "publisher": "aegorsuch",
+      "publisherType": "community",
+      "hostUpdate": false,
+      "packageName": "com.weartak.plugin.aster",
+      "expectedSignerSha256": "1579b600cd84e619e76a91c2db6b031938c999bc2aad926b9a51ec2b166d348d",
+      "minHostVersionCode": 5840000,
+      "maxHostVersionCode": null,
+      "assetPattern": "^WearTAK-Plugin-Aster-.*\\.apk$"
+    },
+    {
+      "owner": "aegorsuch",
+      "repo": "weartak-plugin-dart",
+      "id": "dart",
+      "name": "Dart",
+      "description": "WearTAK Dart plugin.",
+      "publisher": "aegorsuch",
+      "publisherType": "community",
+      "hostUpdate": false,
+      "packageName": "com.weartak.plugin.dart",
+      "expectedSignerSha256": "1579b600cd84e619e76a91c2db6b031938c999bc2aad926b9a51ec2b166d348d",
+      "minHostVersionCode": 5840000,
+      "maxHostVersionCode": null,
+      "assetPattern": "^WearTAK-Plugin-Dart-.*\\.apk$"
+    },
+    {
+      "owner": "aegorsuch",
+      "repo": "weartak-plugin-somewear",
+      "id": "somewear",
+      "name": "Somewear",
+      "description": "WearTAK Somewear integration plugin.",
+      "publisher": "aegorsuch",
+      "publisherType": "community",
+      "hostUpdate": false,
+      "packageName": "com.weartak.plugin.somewearlabs",
+      "expectedSignerSha256": "1579b600cd84e619e76a91c2db6b031938c999bc2aad926b9a51ec2b166d348d",
+      "minHostVersionCode": 5840000,
+      "maxHostVersionCode": null,
+      "assetPattern": "^WearTAK-Plugin-Somewear-.*\\.apk$"
+    },
+    {
+      "owner": "aegorsuch",
+      "repo": "weartak-plugin-lattice",
+      "id": "lattice",
+      "name": "Lattice",
+      "description": "WearTAK Lattice plugin.",
+      "publisher": "aegorsuch",
+      "publisherType": "community",
+      "hostUpdate": false,
+      "packageName": "com.weartak.plugin.lattice",
+      "expectedSignerSha256": "1579b600cd84e619e76a91c2db6b031938c999bc2aad926b9a51ec2b166d348d",
+      "minHostVersionCode": 5840000,
+      "maxHostVersionCode": null,
+      "assetPattern": "^WearTAK-Plugin-Lattice-.*\\.apk$"
     }
   ],
   "pendingRepositories": [
-    "aegorsuch/weartak-plugin-aster",
-    "aegorsuch/weartak-plugin-dart",
     "aegorsuch/weartak-plugin-ditto",
-    "aegorsuch/weartak-plugin-falcon",
     "aegorsuch/weartak-plugin-hail",
-    "aegorsuch/weartak-plugin-somewear",
-    "aegorsuch/weartak-plugin-lattice",
+    "aegorsuch/weartak-plugin-falcon",
     "aegorsuch/weartak-plugin-nearby-drop"
   ]
 }

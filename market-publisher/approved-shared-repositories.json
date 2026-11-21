@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 2,
+  "catalogTarget": "shared",
+  "repositories": [
+    {
+      "owner": "aegorsuch",
+      "repo": "weartak-wearos",
+      "id": "weartak",
+      "name": "WearTAK-WearOS",
+      "description": "WearTAK application update.",
+      "publisher": "WearTAK",
+      "publisherType": "official",
+      "hostUpdate": true,
+      "packageName": "com.aitech.weartak_civ",
+      "expectedSignerSha256": "1579b600cd84e619e76a91c2db6b031938c999bc2aad926b9a51ec2b166d348d",
+      "assetPattern": "^WearTAK-[0-9].*\\.apk$",
+      "targets": [
+        {
+          "productId": "weartak-wearos",
+          "editionIds": ["civ", "mil"],
+          "minHostVersionCode": 1,
+          "maxHostVersionCode": null
+        }
+      ]
+    },
+    {
+      "owner": "aegorsuch",
+      "repo": "weartak-tracker",
+      "id": "weartak-tracker",
+      "name": "WearTAK-Tracker",
+      "description": "WearTAK-Tracker application update.",
+      "publisher": "WearTAK",
+      "publisherType": "official",
+      "hostUpdate": true,
+      "packageName": "com.tak.weartak_tracker",
+      "expectedSignerSha256": "430f146736b3dafc44157ff0b62836d16202244da17209176cb335ef0e63f2ec",
+      "assetPattern": "^WearTAK-Tracker-[0-9][A-Za-z0-9._-]*-p[0-9]+\\.apk$",
+      "targets": [
+        {
+          "productId": "weartak-tracker",
+          "editionIds": ["civ", "mil"],
+          "minHostVersionCode": 1,
+          "maxHostVersionCode": null
+        }
+      ]
+    },
+    {
+      "owner": "aegorsuch",
+      "repo": "weartak-plugin-aster",
+      "id": "aster",
+      "name": "Aster",
+      "description": "WearTAK Aster evaluation plugin.",
+      "publisher": "aegorsuch",
+      "publisherType": "community",
+      "hostUpdate": false,
+      "packageName": "com.weartak.plugin.aster",
+      "expectedSignerSha256": "1579b600cd84e619e76a91c2db6b031938c999bc2aad926b9a51ec2b166d348d",
+      "assetPattern": "^WearTAK-Plugin-Aster-.*\\.apk$",
+      "targets": [
+        {
+          "productId": "weartak-wearos",
+          "editionIds": ["civ", "mil"],
+          "minHostVersionCode": 1,
+          "maxHostVersionCode": null
+        },
+        {
+          "productId": "weartak-tracker",
+          "editionIds": ["civ", "mil"],
+          "minHostVersionCode": 1,
+          "maxHostVersionCode": null
+        }
+      ]
+    }
+  ],
+  "pendingRepositories": [
+    "aegorsuch/weartak-plugin-dart",
+    "aegorsuch/weartak-plugin-ditto",
+    "aegorsuch/weartak-plugin-falcon",
+    "aegorsuch/weartak-plugin-hail",
+    "aegorsuch/weartak-plugin-somewear",
+    "aegorsuch/weartak-plugin-lattice",
+    "aegorsuch/weartak-plugin-nearby-drop"
+  ]
+}
