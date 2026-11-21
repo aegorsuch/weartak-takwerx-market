@@ -167,6 +167,21 @@
     },
     {
       "owner": "aegorsuch",
+      "repo": "weartak-plugin-falcon",
+      "id": "falcon",
+      "name": "Falcon",
+      "description": "UAS acoustic detection, disabled by default; requires host-provided SDK v3 mono PCM16 audio at 44,100 Hz.",
+      "publisher": "aegorsuch",
+      "publisherType": "community",
+      "hostUpdate": false,
+      "packageName": "com.weartak.plugin.falcon",
+      "expectedSignerSha256": "1579b600cd84e619e76a91c2db6b031938c999bc2aad926b9a51ec2b166d348d",
+      "minHostVersionCode": 5840776,
+      "maxHostVersionCode": null,
+      "assetPattern": "^WearTAK-Plugin-Falcon-.*\\.apk$"
+    },
+    {
+      "owner": "aegorsuch",
       "repo": "weartak-plugin-somewear",
       "id": "somewear",
       "name": "Somewear",
@@ -198,7 +213,6 @@
   ],
   "pendingRepositories": [
     "aegorsuch/weartak-plugin-hail",
-    "aegorsuch/weartak-plugin-falcon",
     "aegorsuch/weartak-plugin-nearby-drop"
   ]
 }

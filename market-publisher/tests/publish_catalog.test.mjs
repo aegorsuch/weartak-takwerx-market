@@ -507,6 +507,38 @@ test("publishes the approved Ditto scaffold for WearOS", async () => {
   assert.equal(entry.maxHostVersionCode, null);
 });
 
+test("publishes the approved Falcon release for WearOS with audio requirements", async () => {
+  const config = JSON.parse(await readFile(
+    new URL("../approved-repositories.json", import.meta.url),
+    "utf8",
+  ));
+  const falcon = config.repositories.find((entry) => entry.id === "falcon");
+  assert.ok(falcon);
+  assert.equal(config.pendingRepositories.includes("aegorsuch/weartak-plugin-falcon"), false);
+
+  const name = "WearTAK-Plugin-Falcon-5.8.4-p9.apk";
+  const asset = {
+    name,
+    size: 3,
+    browser_download_url: `https://github.com/aegorsuch/weartak-plugin-falcon/releases/download/TAK.gov-Forge-CI-CD-Pipeline-Release/${name}`,
+  };
+  const catalog = await buildCatalog({ schemaVersion: 1, repositories: [falcon] }, {
+    fetchImpl: fetchForRelease([asset], { assetBytes: new Map([[name, Buffer.from("apk")]]) }),
+    inspect: async () => ({
+      packageName: "com.weartak.plugin.falcon",
+      versionName: "5.8.4-p9+8d81170d",
+      versionCode: 5840009,
+      signerSha256: "1579b600cd84e619e76a91c2db6b031938c999bc2aad926b9a51ec2b166d348d",
+    }),
+  });
+  const [entry] = catalog.plugins;
+  assert.equal(entry.description, "UAS acoustic detection, disabled by default; requires host-provided SDK v3 mono PCM16 audio at 44,100 Hz.");
+  assert.equal(entry.versionCode, 5840009);
+  assert.equal(entry.versionName, "5.8.4-p9+8d81170d");
+  assert.equal(entry.minHostVersionCode, 5840776);
+  assert.equal(entry.maxHostVersionCode, null);
+});
+
 test("rejects cross-target approvals and host impersonation before making requests", async () => {
   const wearosConfig = JSON.parse(await readFile(
     new URL("../approved-repositories.json", import.meta.url),
