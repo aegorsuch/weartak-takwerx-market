@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { generateKeyPairSync, verify } from "node:crypto";
-import { access, mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -34,6 +34,18 @@ function source(overrides = {}) {
     minHostVersionCode: 5840000,
     maxHostVersionCode: null,
     assetPattern: "^WearTAK-Plugin-Example-.*\\.apk$",
+    ...overrides,
+  };
+}
+
+function sharedSource(overrides = {}) {
+  const { minHostVersionCode, maxHostVersionCode, ...base } = source();
+  return {
+    ...base,
+    targets: [
+      { productId: "weartak-wearos", editionIds: ["civ", "mil"], minHostVersionCode, maxHostVersionCode },
+      { productId: "weartak-tracker", editionIds: ["civ"], minHostVersionCode: 20, maxHostVersionCode: 30 },
+    ],
     ...overrides,
   };
 }
@@ -103,6 +115,141 @@ test("builds entries only from stable APK assets and uses verified metadata", as
     sourceUrl: "https://github.com/aegorsuch/weartak-plugin-example",
     hostUpdate: false,
   });
+});
+
+test("builds and signs a shared catalog with product-specific editions and ranges", async () => {
+  const asset = {
+    name: "WearTAK-Plugin-Example-1.apk",
+    size: 3,
+    browser_download_url: "https://github.com/aegorsuch/weartak-plugin-example/releases/download/v1/WearTAK-Plugin-Example-1.apk",
+  };
+  const approved = sharedSource();
+  const config = { schemaVersion: 2, catalogTarget: "shared", repositories: [approved] };
+  let inspections = 0;
+  const options = {
+    target: "shared",
+    fetchImpl: fetchForRelease([asset], { assetBytes: new Map([[asset.name, Buffer.from("apk")]]) }),
+    inspect: async () => {
+      inspections += 1;
+      return { packageName: approved.packageName, versionName: "1.0", versionCode: 1, signerSha256: "a".repeat(64) };
+    },
+  };
+  const catalog = await buildCatalog(config, options);
+  assert.equal(catalog.schemaVersion, 2);
+  assert.deepEqual(catalog.plugins[0].targets, approved.targets);
+  assert.equal(Object.hasOwn(catalog.plugins[0], "minHostVersionCode"), false);
+  const keys = generateKeyPairSync("ed25519");
+  const publicKey = keys.publicKey.export({ format: "der", type: "spki" }).toString("base64");
+  const pem = keys.privateKey.export({ format: "pem", type: "pkcs8" }).toString();
+  const envelope = JSON.parse(signCatalog(catalog, pem, publicKey));
+  const payload = Buffer.from(envelope.payload, "base64");
+  assert.deepEqual(JSON.parse(payload.toString()), catalog);
+  assert.equal(verify(null, payload, keys.publicKey, Buffer.from(envelope.signature, "base64")), true);
+  assert.deepEqual(await buildCatalog(config, { ...options, previousCatalog: catalog }), catalog);
+  assert.equal(inspections, 1);
+  const changed = structuredClone(config);
+  changed.repositories[0].targets[1].editionIds.push("mil");
+  const updated = await buildCatalog(changed, { ...options, previousCatalog: catalog });
+  assert.equal(inspections, 2);
+  assert.deepEqual(updated.plugins[0].targets, changed.repositories[0].targets);
+});
+
+test("rejects malformed or ambiguous shared targets before network access", async () => {
+  const valid = sharedSource().targets;
+  const invalid = [
+    undefined, [], {}, [null],
+    [{ ...valid[0], productId: "unknown" }],
+    [valid[0], valid[0]],
+    [{ ...valid[0], editionIds: [] }],
+    [{ ...valid[0], editionIds: ["unknown"] }],
+    [{ ...valid[0], editionIds: ["civ", "civ"] }],
+    [{ ...valid[0], minHostVersionCode: 0 }],
+    [{ ...valid[0], minHostVersionCode: 2, maxHostVersionCode: 1 }],
+    [{ ...valid[0], maxHostVersionCode: undefined }],
+    [{ ...valid[0], maxHostVersionCode: 1.5 }],
+    [{ ...valid[0], extra: true }],
+  ];
+  for (const targets of invalid) {
+    await assert.rejects(buildCatalog({
+      schemaVersion: 2, catalogTarget: "shared", repositories: [sharedSource({ targets })],
+    }, { target: "shared", fetchImpl: async () => assert.fail("Invalid metadata must not reach network.") }),
+    /invalid targets/);
+  }
+  for (const field of ["minHostVersionCode", "maxHostVersionCode", "productIds", "editionIds", "hostVersionRanges"]) {
+    await assert.rejects(buildCatalog({
+      schemaVersion: 2, catalogTarget: "shared", repositories: [sharedSource({ [field]: null })],
+    }, { target: "shared" }), /invalid targets/);
+  }
+  await assert.rejects(buildCatalog({ schemaVersion: 1, catalogTarget: "shared", repositories: [] },
+    { target: "shared" }), /configuration schema/);
+  await assert.rejects(buildCatalog({ schemaVersion: 2, repositories: [] },
+    { target: "shared" }), /does not match/);
+});
+
+test("shared catalog preserves host identity and APK package and signer policy", async () => {
+  const tracker = trackerConfig.repositories[0];
+  const { minHostVersionCode, maxHostVersionCode, ...base } = tracker;
+  const host = { ...base, targets: [{
+    productId: "weartak-tracker", editionIds: ["civ"], minHostVersionCode, maxHostVersionCode,
+  }] };
+  const config = { schemaVersion: 2, catalogTarget: "shared", repositories: [host] };
+  const asset = {
+    name: "WearTAK-Tracker-5.8.4-p62.apk", size: 3,
+    browser_download_url: "https://github.com/aegorsuch/weartak-tracker/releases/download/takgov-pipeline/WearTAK-Tracker-5.8.4-p62.apk",
+  };
+  const options = {
+    target: "shared",
+    fetchImpl: fetchForRelease([asset], { assetBytes: new Map([[asset.name, Buffer.from("apk")]]) }),
+    inspect: async () => ({
+      packageName: host.packageName, versionName: "1", versionCode: 1,
+      signerSha256: host.expectedSignerSha256,
+    }),
+  };
+  assert.deepEqual((await buildCatalog(config, options)).plugins[0].targets, host.targets);
+  for (const override of [{ packageName: "org.example.wrong" }, { signerSha256: "a".repeat(64) }]) {
+    await assert.rejects(buildCatalog(config, {
+      ...options, inspect: async () => ({ ...await options.inspect(), ...override }),
+    }), /package mismatch|signer mismatch/);
+  }
+  await assert.rejects(buildCatalog({
+    ...config, repositories: [{ ...host, targets: [{ ...host.targets[0], productId: "weartak-wearos" }] }],
+  }, options), /Only the official/);
+  await assert.rejects(buildCatalog(config, {
+    ...options, fetchImpl: fetchForRelease([], { releaseOverrides: { prerelease: true } }),
+  }), /requires an eligible verified host APK/);
+});
+
+test("shared CLI requires explicit approval file and writes a signed v2 envelope separately", async (t) => {
+  const dir = await mkdtemp(path.join(tmpdir(), "weartak-shared-catalog-test-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const configPath = path.join(dir, "approved.json");
+  const outputDir = path.join(dir, "output");
+  await writeFile(configPath, JSON.stringify({
+    schemaVersion: 2, catalogTarget: "shared", repositories: [],
+  }));
+  const keys = generateKeyPairSync("ed25519");
+  const env = {
+    ...process.env,
+    MARKET_CATALOG_TARGET: "shared",
+    MARKET_APPROVED_REPOSITORIES: configPath,
+    MARKET_OUTPUT_DIR: outputDir,
+    MARKET_CATALOG_SIGNING_KEY: keys.privateKey.export({ format: "pem", type: "pkcs8" }).toString(),
+    MARKET_CATALOG_PUBLIC_KEY: keys.publicKey.export({ format: "der", type: "spki" }).toString("base64"),
+  };
+  const script = fileURLToPath(new URL("../publish_catalog.mjs", import.meta.url));
+  const missing = spawnSync(process.execPath, [script], {
+    env: { ...env, MARKET_APPROVED_REPOSITORIES: "" }, encoding: "utf8", timeout: 10000,
+  });
+  assert.ifError(missing.error);
+  assert.equal(missing.status, 1);
+  assert.match(missing.stderr, /requires MARKET_APPROVED_REPOSITORIES/);
+  const result = spawnSync(process.execPath, [script], { env, encoding: "utf8", timeout: 10000 });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stderr);
+  const envelope = JSON.parse(await readFile(path.join(outputDir, "catalog.json"), "utf8"));
+  const payload = Buffer.from(envelope.payload, "base64");
+  assert.deepEqual(JSON.parse(payload.toString()), { schemaVersion: 2, plugins: [] });
+  assert.equal(verify(null, payload, keys.publicKey, Buffer.from(envelope.signature, "base64")), true);
 });
 
 test("rejects releases signed by a certificate outside the approved profile", async () => {

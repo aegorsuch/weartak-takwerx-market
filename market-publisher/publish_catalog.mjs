@@ -18,6 +18,7 @@ const MAX_CATALOG_BYTES = 512 * 1024;
 const MAX_PLUGINS = 200;
 const CATALOG_TARGETS = new Map([
   ["wearos", {
+    productId: "weartak-wearos",
     repository: "aegorsuch/weartak-wearos",
     packageName: "com.aitech.weartak_civ",
     configFile: "approved-repositories.json",
@@ -25,6 +26,7 @@ const CATALOG_TARGETS = new Map([
     outputDirectory: "site",
   }],
   ["tracker", {
+    productId: "weartak-tracker",
     repository: "aegorsuch/weartak-tracker",
     packageName: "com.tak.weartak_tracker",
     configFile: "approved-tracker-repositories.json",
@@ -32,12 +34,14 @@ const CATALOG_TARGETS = new Map([
     outputDirectory: "tracker-site",
   }],
 ]);
+const PRODUCT_IDS = new Set([...CATALOG_TARGETS.values()].map((profile) => profile.productId));
+const EDITION_IDS = new Set(["civ", "mil"]);
 const PACKAGE_PATTERN = /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$/;
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
 function catalogTarget(target) {
   const profile = CATALOG_TARGETS.get(target);
-  if (!profile) throw new Error("Catalog target must be 'wearos' or 'tracker'.");
+  if (!profile) throw new Error("Catalog target must be 'wearos', 'tracker', or 'shared'.");
   return profile;
 }
 
@@ -229,8 +233,42 @@ async function inspectApk(apkBytes) {
   }
 }
 
-function validateSource(source, target) {
-  const profile = catalogTarget(target);
+function validBounds(range) {
+  return Number.isSafeInteger(range.minHostVersionCode) && range.minHostVersionCode > 0 &&
+    (range.maxHostVersionCode === null ||
+      (Number.isSafeInteger(range.maxHostVersionCode) &&
+        range.maxHostVersionCode >= range.minHostVersionCode));
+}
+
+function validateCompatibility(source, schemaVersion) {
+  if (schemaVersion === 1) {
+    if (!validBounds(source)) {
+      throw new Error(`Approved repository '${source.repo}' has invalid host-version bounds.`);
+    }
+    return;
+  }
+  const targets = source.targets;
+  if (!Array.isArray(targets) || targets.length === 0 ||
+      targets.some((item) => !item || typeof item !== "object" || Array.isArray(item) ||
+        Object.keys(item).length !== 4 ||
+        !Object.hasOwn(item, "productId") || !PRODUCT_IDS.has(item.productId) ||
+        !Object.hasOwn(item, "editionIds") || !Array.isArray(item.editionIds) ||
+        item.editionIds.length === 0 ||
+        item.editionIds.some((id) => !EDITION_IDS.has(id)) ||
+        new Set(item.editionIds).size !== item.editionIds.length ||
+        !Object.hasOwn(item, "minHostVersionCode") ||
+        !Object.hasOwn(item, "maxHostVersionCode") || !validBounds(item)) ||
+      new Set(targets.map((item) => item.productId)).size !== targets.length ||
+      ["minHostVersionCode", "maxHostVersionCode", "productIds", "editionIds", "hostVersionRanges"]
+        .some((field) => Object.hasOwn(source, field))) {
+    throw new Error(`Approved repository '${source.repo}' has invalid targets.`);
+  }
+}
+
+function validateSource(source, target, schemaVersion) {
+  if (!source || typeof source !== "object" || Array.isArray(source)) {
+    throw new Error("Approved repository entry is invalid.");
+  }
   const textLimits = {
     owner: 100,
     repo: 100,
@@ -251,23 +289,27 @@ function validateSource(source, target) {
       !/^[A-Za-z0-9_.-]+$/.test(source.repo)) {
     throw new Error("Approved repository name is invalid.");
   }
-  if (!Number.isSafeInteger(source.minHostVersionCode) || source.minHostVersionCode <= 0 ||
-      (source.maxHostVersionCode !== null &&
-        (!Number.isSafeInteger(source.maxHostVersionCode) ||
-          source.maxHostVersionCode < source.minHostVersionCode))) {
-    throw new Error(`Approved repository '${source.repo}' has invalid host-version bounds.`);
-  }
+  validateCompatibility(source, schemaVersion);
   if (!["official", "community"].includes(source.publisherType) ||
       typeof source.hostUpdate !== "boolean") {
     throw new Error(`Approved repository '${source.repo}' has invalid publisher policy.`);
   }
   if (source.hostUpdate) {
+    const hostTarget = target === "shared"
+      ? [...CATALOG_TARGETS.entries()].find(([, host]) =>
+        host.packageName === source.packageName &&
+        `${source.owner.toLowerCase()}/${source.repo.toLowerCase()}` === host.repository)?.[0]
+      : target;
+    const profile = hostTarget && catalogTarget(hostTarget);
     if (source.publisherType !== "official" ||
+        !profile ||
         source.packageName !== profile.packageName ||
-        `${source.owner.toLowerCase()}/${source.repo.toLowerCase()}` !== profile.repository) {
+        `${source.owner.toLowerCase()}/${source.repo.toLowerCase()}` !== profile.repository ||
+        (schemaVersion === 2 &&
+          (source.targets.length !== 1 || source.targets[0].productId !== profile.productId))) {
       throw new Error(`Only the official ${target} repository and package may publish host updates.`);
     }
-    if (target === "tracker" && !/^[0-9a-f]{64}$/.test(source.expectedSignerSha256 || "")) {
+    if (hostTarget === "tracker" && !/^[0-9a-f]{64}$/.test(source.expectedSignerSha256 || "")) {
       throw new Error("Tracker host updates require an approved signer.");
     }
   } else if (source.publisherType !== "community" ||
@@ -306,7 +348,7 @@ function releaseFingerprint(release, assets) {
   return createHash("sha256").update(content).digest("hex");
 }
 
-function matchesApprovedSource(entry, source, fingerprint, eligibleAssets) {
+function matchesApprovedSource(entry, source, fingerprint, eligibleAssets, schemaVersion) {
   return entry &&
     entry.publisherReleaseFingerprint === fingerprint &&
     eligibleAssets.some((asset) => asset.browser_download_url === entry.apkUrl) &&
@@ -316,14 +358,16 @@ function matchesApprovedSource(entry, source, fingerprint, eligibleAssets) {
     entry.publisher === source.publisher &&
     entry.publisherType === source.publisherType &&
     entry.packageName === source.packageName &&
-    entry.minHostVersionCode === source.minHostVersionCode &&
-    entry.maxHostVersionCode === source.maxHostVersionCode &&
+    (schemaVersion === 1
+      ? entry.minHostVersionCode === source.minHostVersionCode &&
+        entry.maxHostVersionCode === source.maxHostVersionCode
+      : JSON.stringify(entry.targets) === JSON.stringify(source.targets)) &&
     entry.hostUpdate === source.hostUpdate &&
     (!source.expectedSignerSha256 ||
       entry.signerSha256 === source.expectedSignerSha256.toLowerCase());
 }
 
-async function inspectReleaseAssets(source, release, fetchImpl, inspect, previousEntry) {
+async function inspectReleaseAssets(source, release, fetchImpl, inspect, previousEntry, schemaVersion) {
   const assetPattern = new RegExp(source.assetPattern, "i");
   const assets = (release.assets || [])
     .filter((asset) => assetPattern.test(asset.name))
@@ -344,7 +388,7 @@ async function inspectReleaseAssets(source, release, fetchImpl, inspect, previou
     return null;
   }
   const fingerprint = releaseFingerprint(release, assets);
-  if (matchesApprovedSource(previousEntry, source, fingerprint, eligibleAssets)) {
+  if (matchesApprovedSource(previousEntry, source, fingerprint, eligibleAssets, schemaVersion)) {
     return { entry: previousEntry, reused: true };
   }
 
@@ -395,8 +439,9 @@ export async function buildCatalog(config, {
   previousCatalog = null,
   target = "wearos",
 } = {}) {
-  catalogTarget(target);
-  if (config?.schemaVersion !== 1 || !Array.isArray(config.repositories) ||
+  if (target !== "shared") catalogTarget(target);
+  const schemaVersion = target === "shared" ? 2 : 1;
+  if (config?.schemaVersion !== schemaVersion || !Array.isArray(config.repositories) ||
       !Array.isArray(config.pendingRepositories || [])) {
     throw new Error("Approved repository configuration schema is invalid.");
   }
@@ -410,7 +455,7 @@ export async function buildCatalog(config, {
   const ids = new Set();
   const repos = new Set();
   for (const source of config.repositories) {
-    validateSource(source, target);
+    validateSource(source, target, schemaVersion);
     const fullName = `${source.owner.toLowerCase()}/${source.repo.toLowerCase()}`;
     if (ids.has(source.id) || repos.has(fullName)) {
       throw new Error("Approved repository configuration contains duplicates.");
@@ -433,7 +478,8 @@ export async function buildCatalog(config, {
 
   const plugins = [];
   const previousEntries = new Map(
-    (previousCatalog?.plugins || []).map((plugin) => [plugin.id, plugin]),
+    (previousCatalog?.schemaVersion === schemaVersion && Array.isArray(previousCatalog.plugins)
+      ? previousCatalog.plugins : []).map((plugin) => [plugin.id, plugin]),
   );
   for (const source of config.repositories) {
     const apiUrl = `https://api.github.com/repos/${source.owner}/${source.repo}/releases/latest`;
@@ -449,9 +495,12 @@ export async function buildCatalog(config, {
       fetchImpl,
       inspect,
       previousEntries.get(source.id),
+      schemaVersion,
     );
     if (selected === null) {
-      if (target === "tracker" && source.hostUpdate) {
+      if (source.hostUpdate && (target === "tracker" ||
+          (target === "shared" &&
+            source.targets.some((item) => item.productId === "weartak-tracker")))) {
         throw new Error("Tracker host APK exceeds the 250 MiB client limit; catalog was not built.");
       }
       continue;
@@ -470,8 +519,12 @@ export async function buildCatalog(config, {
       packageName: selected.metadata.packageName,
       versionName: selected.metadata.versionName,
       versionCode: selected.metadata.versionCode,
-      minHostVersionCode: source.minHostVersionCode,
-      maxHostVersionCode: source.maxHostVersionCode,
+      ...(schemaVersion === 1 ? {
+        minHostVersionCode: source.minHostVersionCode,
+        maxHostVersionCode: source.maxHostVersionCode,
+      } : {
+        targets: source.targets,
+      }),
       apkUrl: assetUrl,
       apkSha256: selected.apkSha256,
       signerSha256: selected.metadata.signerSha256,
@@ -485,11 +538,15 @@ export async function buildCatalog(config, {
   if (new Set(packageNames).size !== packageNames.length) {
     throw new Error("Catalog sources contain duplicate APK package names.");
   }
-  if (target === "tracker" && !plugins.some((plugin) => plugin.hostUpdate)) {
+  if ((target === "tracker" || (target === "shared" &&
+      config.repositories.some((source) => source.hostUpdate &&
+        source.targets.some((item) => item.productId === "weartak-tracker")))) &&
+      !plugins.some((plugin) => plugin.hostUpdate &&
+        plugin.packageName === CATALOG_TARGETS.get("tracker").packageName)) {
     throw new Error("Tracker catalog requires an eligible verified host APK.");
   }
   plugins.sort((left, right) => left.id.localeCompare(right.id));
-  return { schemaVersion: 1, plugins };
+  return { schemaVersion, plugins };
 }
 
 export function signCatalog(catalog, privateKeyPem, expectedPublicKeyBase64) {
@@ -523,17 +580,21 @@ export function signCatalog(catalog, privateKeyPem, expectedPublicKeyBase64) {
 async function main() {
   const currentDir = path.dirname(fileURLToPath(import.meta.url));
   const target = process.env.MARKET_CATALOG_TARGET || "wearos";
-  const profile = catalogTarget(target);
+  const profile = target === "shared" ? null : catalogTarget(target);
   const configPath = process.env.MARKET_APPROVED_REPOSITORIES ||
-    path.join(currentDir, profile.configFile);
+    (profile && path.join(currentDir, profile.configFile));
+  if (!configPath) throw new Error("Shared catalog requires MARKET_APPROVED_REPOSITORIES.");
   const config = JSON.parse(await readFile(configPath, "utf8"));
   const privateKey = process.env.MARKET_CATALOG_SIGNING_KEY || "";
   const publicKey = process.env.MARKET_CATALOG_PUBLIC_KEY || "";
   signCatalog({ schemaVersion: 1, plugins: [] }, privateKey, publicKey);
-  const previousCatalog = await fetchPreviousCatalog(globalThis.fetch, publicKey, target);
+  const previousCatalog = profile
+    ? await fetchPreviousCatalog(globalThis.fetch, publicKey, target)
+    : null;
   const catalog = await buildCatalog(config, { previousCatalog, target });
   const envelope = signCatalog(catalog, privateKey, publicKey);
-  const outputDir = process.env.MARKET_OUTPUT_DIR || path.join(currentDir, profile.outputDirectory);
+  const outputDir = process.env.MARKET_OUTPUT_DIR ||
+    path.join(currentDir, profile ? profile.outputDirectory : "shared-site");
   await mkdir(outputDir, { recursive: true });
   await writeFile(path.join(outputDir, "catalog.json"), envelope, { mode: 0o644 });
   console.log(`Published catalog envelope with ${catalog.plugins.length} release(s).`);
