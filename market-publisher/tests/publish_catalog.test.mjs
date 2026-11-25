@@ -500,7 +500,7 @@ test("publishes the approved Ditto scaffold for WearOS", async () => {
     }),
   });
   const [entry] = catalog.plugins;
-  assert.equal(entry.description, "Inactive development scaffold; Ditto mesh functionality is not implemented.");
+  assert.equal(entry.description, "WearTAK Ditto transport plugin.");
   assert.equal(entry.versionCode, 5840017);
   assert.equal(entry.versionName, "5.8.4-p17+029ce5af");
   assert.equal(entry.minHostVersionCode, 5840000);
