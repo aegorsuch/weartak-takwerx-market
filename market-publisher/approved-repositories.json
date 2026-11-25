@@ -209,6 +209,21 @@
       "minHostVersionCode": 5840000,
       "maxHostVersionCode": null,
       "assetPattern": "^WearTAK-Plugin-Lattice-.*\\.apk$"
+    },
+    {
+      "owner": "aegorsuch",
+      "repo": "weartak-plugin-crm",
+      "id": "crm",
+      "name": "CRM",
+      "description": "WearTAK CRM plugin.",
+      "publisher": "aegorsuch",
+      "publisherType": "community",
+      "hostUpdate": false,
+      "packageName": "com.weartak.plugin.crm",
+      "expectedSignerSha256": "1579b600cd84e619e76a91c2db6b031938c999bc2aad926b9a51ec2b166d348d",
+      "minHostVersionCode": 5840911,
+      "maxHostVersionCode": null,
+      "assetPattern": "^WearTAK-Plugin-CRM-.*\\.apk$"
     }
   ],
   "pendingRepositories": [
